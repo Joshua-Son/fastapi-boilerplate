@@ -1,6 +1,5 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
-
-def initialise(db: Session) -> None:
-    # Write database initialisation queries.
+async def initialise(db: AsyncSession) -> None:
+    # Write database initialization queries using the async session.
     pass

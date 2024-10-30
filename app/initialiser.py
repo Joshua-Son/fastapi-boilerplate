@@ -1,15 +1,13 @@
+import asyncio
 from app.database.initialise import initialise
-from app.database.session import SessionLocal
+from app.database.session import AsyncSessionLocal
 
-
-def init() -> None:
-    db = SessionLocal()
-    initialise(db)
-
+async def init() -> None:
+    async with AsyncSessionLocal() as session:
+        await initialise(session)
 
 def main() -> None:
-    init()
-
+    asyncio.run(init())
 
 if __name__ == "__main__":
     main()

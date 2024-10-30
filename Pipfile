@@ -10,13 +10,14 @@ pytest = "*"
 [packages]
 fastapi = "*"
 alembic = "*"
-uvicorn = "*"
-sqlalchemy = "*"
+uvicorn = ">=0.14.0"
+"sqlalchemy[asyncio]" = "*"
 pydantic = "*"
-psycopg2-binary = "*"
+pydantic-settings = "*"
 python-multipart = "*"
 requests = "*"
 python-dotenv = "*"
+asyncpg = "*"
 
 [requires]
 python_version = "3.8"
