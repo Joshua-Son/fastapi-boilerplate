@@ -6,17 +6,19 @@ from typing import Optional
 class ParticipationBase(BaseModel):
     id: int
     user_uuid: uuid.UUID  # Use UUID type
-    arena_id: int
-    score: Optional[int] = 0
-    status: str  # e.g., "playing", "finished"
+    arena_id: uuid.UUID
     joined_at: datetime
+    challenge: int
 
-class ParticipationCreate(ParticipationBase):
-    joined_at: datetime = Field(default_factory=datetime.now)
+class ParticipationCreate(BaseModel):
+    arena_id: uuid.UUID
+    user_uuid: uuid.UUID
+    challenge: int
+  
+
 
 class ParticipationUpdate(ParticipationBase):
-    score: Optional[int] = None
-    status: Optional[str] = None
+    pass
 
 class ParticipationResponse(ParticipationBase):
     class Config:

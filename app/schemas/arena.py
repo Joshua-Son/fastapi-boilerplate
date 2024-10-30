@@ -12,12 +12,18 @@ class ArenaBase(BaseModel):
     created_at: Optional[datetime]
     current_users: Optional[int]
 
+
 class ArenaCreate(BaseModel):
     game_id: uuid.UUID
     max_users: int
-    entry_fee: int
+    entry_fee: Optional[int]
 
-
+class ArenaMultiCreateAPI(BaseModel):
+    game_id: str
+    user_id: str
+    entryFee: float
+    is_practice: bool
+    user_limit: int
 
 
 class ArenaUpdate(ArenaBase):
