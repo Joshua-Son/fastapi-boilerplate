@@ -12,6 +12,8 @@ import uuid
 
 router = APIRouter()
 
+# TODO: signal, findtournament, removeplaym, removeplayt(torn)
+
 @router.get("", response_model=schemas.ResponseBase)
 async def read_arena(db: AsyncSession = Depends(get_db), skip: int = 0, limit: int = 100):
     try:

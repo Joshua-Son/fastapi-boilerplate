@@ -14,7 +14,11 @@ class ParticipationCreate(BaseModel):
     arena_id: uuid.UUID
     user_uuid: uuid.UUID
     challenge: int
-  
+
+class ParticipationDeleteAPI(BaseModel):
+    arena_id: str
+    user_id: str
+    challenge: float
 
 
 class ParticipationUpdate(ParticipationBase):

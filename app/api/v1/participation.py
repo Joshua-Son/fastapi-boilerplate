@@ -20,3 +20,13 @@ async def read_participation(db: AsyncSession = Depends(get_db), skip: int = 0, 
         return schemas.SuccessResponse(data=jsonable_encoder(participation))
     except Exception as e:
         return schemas.ErrorResponse(code=500, message=f"An error occurred: {str(e)}", data=None)
+    
+
+@router.delete("", response_model=schemas.Message)
+async def delete_participation(*, db:AsyncSession = Depends(get_db), play_data_body: schemas.ParticipationDeleteAPI):
+    try:
+        result = await crud.participation.delete_participation(db, play_data_body)
+        return {"message": f"Remove {result.id}."}
+
+    except Exception as e:
+        return {"message": "Deleting failed."}

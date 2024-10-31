@@ -3,10 +3,13 @@ version: "3.8"
 services:
   app:
     build: .
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
+    environment:
+      REDIS_HOST: redis # Specify Redis service name
     depends_on:
       - db
+      - redis
 
   db:
     image: postgres:latest
@@ -15,10 +18,29 @@ services:
       POSTGRES_DB: fastapi_db
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: yourpassword # Update your password
+      POSTGRES_HOST_AUTH_METHOD: md5
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+
+  redis: # Add Redis service
+    image: redis:latest
+    ports:
+      - "6379:6379"
+
+  nginx:
+    image: nginx:alpine
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d # Mount the conf.d directory
+      # - ./nginx.conf:/etc/nginx/nginx.conf # Your Nginx config
+      - ./logs:/var/log/nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - app
+    restart: always
 
 volumes:
   postgres_data:

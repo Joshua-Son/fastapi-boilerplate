@@ -2,8 +2,6 @@ from sqlalchemy import Column, Integer, Enum, DateTime, UUID
 from sqlalchemy.sql import func  # Import the func module
 from sqlalchemy.orm import relationship
 
-import uuid
-
 from app.database.base_class import Base
     
 class Arena(Base):

@@ -8,9 +8,6 @@ Create Date: 2020-10-01 12:32:07.701738
 from alembic import op
 import sqlalchemy as sa
 
-
-
-
 # revision identifiers, used by Alembic.
 revision = 'eaae517c1e2f'
 down_revision = None
@@ -50,7 +47,28 @@ def upgrade():
     )
 
     # Create indexes on Participations
-    op.create_index(op.f('idx_participation_arena_id'), 'participation', ['arena_id'], unique=False)  # Index on arena_id
+    op.create_index(op.f('idx_participation_arena_id'), 'participation', ['arena_id', 'user_uuid', 'challenge'], unique=False)
+
+    # Create Gamestream table
+    op.create_table(
+        'gamestream',
+        sa.Column('id', sa.Integer, primary_key=True, autoincrement=True),
+        sa.Column('name', sa.String(), nullable=False),
+        sa.Column('address', sa.String(), nullable=False),
+        sa.Column('addrapi', sa.String(), nullable=False),
+        sa.Column('game_id', sa.String(), nullable=True),
+        sa.Column('player_id', sa.String(), nullable=True),
+        sa.Column('status', sa.String(), nullable=False),
+        sa.Column('started', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('ended', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('time_created', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.Column('time_updated', sa.DateTime(timezone=True), nullable=True),
+        sa.UniqueConstraint('id', 'addrapi', 'address', name='uq_gamestream')
+    )
+
+    # Create indexes on Gamestream
+    op.create_index(op.f('idx_gamestream_status'), 'gamestream', ['status'], unique=False)
+
 
     # Create the function to update current_users
     op.execute("""
@@ -74,14 +92,14 @@ def upgrade():
 
     # Create the triggers
     op.execute("""
-    CREATE TRIGGER participation_insert
+    CREATE OR REPLACE TRIGGER participation_insert
     AFTER INSERT ON participation
     FOR EACH ROW
     EXECUTE FUNCTION update_current_users();
     """)
 
     op.execute("""
-    CREATE TRIGGER participation_delete
+    CREATE OR REPLACE TRIGGER participation_delete
     AFTER DELETE ON participation
     FOR EACH ROW
     EXECUTE FUNCTION update_current_users();
@@ -100,7 +118,9 @@ def downgrade():
     # Drop indexes first
     op.drop_index('idx_participation_arena_id', table_name='participation')
     op.drop_index('idx_arena_optimized', table_name='arena')
+    op.drop_index(op.f('idx_gamestream_status'), table_name='gamestream')
     
     # Drop the tables in reverse order
     op.drop_table('participation')
     op.drop_table('arena')
+    op.drop_table('gamestream')
