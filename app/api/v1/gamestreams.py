@@ -17,7 +17,7 @@ router = APIRouter()
 # Initialize Redis
 cache = redis.Redis(host=os.getenv("REDIS_HOST", "redis"), port=6379, db=0)
 
-# TODO: vmStart, vmStatus, resetSimple, get list, vmReset
+# TODO: vmStart, vmStatus, get list, vmReset
 
 async def reset_redis(db: AsyncSession):
     gstrems_db = await crud.gamestream.get_gstream_all(db)

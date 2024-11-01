@@ -1,6 +1,6 @@
 from typing import Any, List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi.encoders import jsonable_encoder
@@ -8,11 +8,41 @@ from fastapi.encoders import jsonable_encoder
 from app import schemas, crud
 from app.api.deps import get_db
 
-import uuid
+from typing import Dict
 
 router = APIRouter()
 
 # TODO: signal, findtournament, removeplaym, removeplayt(torn)
+
+class Simple:
+    active_connections: Dict[str, WebSocket] = {}
+
+    @staticmethod
+    async def send_msg(user_id:str, message: str):
+        """Send a message to a specific user."""
+        if user_id in Simple.active_connections:
+            websocket = Simple.active_connections[user_id]
+            await websocket.send_text(message)
+
+
+    @staticmethod
+    async def sm_broadcast(message: str):
+        """Broadcast a message to all connected users."""
+        print('Broadcasting:', message)
+        rmsocks = []  # List of sockets to remove
+
+        for user_id, ws in Simple.active_connections.items():
+            try:
+                await ws.send_text(message)
+            except Exception as e:
+                print('Exception occurred for user:', user_id, e)
+                rmsocks.append(user_id)  # Mark user ID for removal
+
+        # Remove disconnected users from active_connections
+        for user_id in rmsocks:
+            del Simple.active_connections[user_id]
+
+        return message
 
 @router.get("", response_model=schemas.ResponseBase)
 async def read_arena(db: AsyncSession = Depends(get_db), skip: int = 0, limit: int = 100):
