@@ -10,9 +10,20 @@ from sqlalchemy.dialects.postgresql import insert
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.future import select
 
-
 class CRUDGamestream(CRUDBase[GameStream, GameStreamCreate, GameStreamUpdate]):
-    async def upsert_gamestream(self, db: AsyncSession, input: GameStreamCreate) -> GameStream:
+    async def get_gstream_all(self, db: AsyncSession) -> List[GameStream]:
+        result = await db.execute(select(self.model))
+        return result.scalars().all()
+  
+    # async def get_by_user_id(self, db: AsyncSession, player_id: str) -> Optional[GameStream]:
+    #     result = await db.execute(select(self.model).where(self.model.player_id == player_id))
+    #     return result.scalars().first()
+    
+    # async def get_idle_gstream(self, db: AsyncSession) -> Optional[GameStream]:
+    #     result = await db.execute(select(self.model).where(self.model.status == "idle"))
+    #     return result.scalars().first()
+    
+    async def upsert_gstream(self, db: AsyncSession, input: GameStreamCreate) -> GameStream:
         obj_in_data = jsonable_encoder(input)
         stmt = insert(self.model).values(**obj_in_data)
 
@@ -28,13 +39,5 @@ class CRUDGamestream(CRUDBase[GameStream, GameStreamCreate, GameStreamUpdate]):
         await db.commit()
 
         return self.model(**obj_in_data)
-    
-    async def get_by_user_id(self, db: AsyncSession, player_id: str) -> Optional[GameStream]:
-        result = await db.execute(select(self.model).where(self.model.player_id == player_id))
-        return result.scalars().first()
-    
-    async def get_idle_stream(self, db: AsyncSession) -> Optional[GameStream]:
-        result = await db.execute(select(self.model).where(self.model.status == "idle"))
-        return result.scalars().first()
     
 gamestream = CRUDGamestream(GameStream)

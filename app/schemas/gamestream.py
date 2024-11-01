@@ -33,6 +33,10 @@ class GameStreamReserve(BaseModel):
     player_id: str
     nation: str
 
+class GameStreamReleaseQuit(BaseModel):
+    id: int
+    player_id: str
+
 
 class GameStreamResponse(GameStreamBase):
     class Config:

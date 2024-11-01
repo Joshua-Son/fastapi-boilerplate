@@ -2,6 +2,7 @@ from typing import Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import func
 
 from fastapi.encoders import jsonable_encoder
 
@@ -16,17 +17,36 @@ router = APIRouter()
 # Initialize Redis
 cache = redis.Redis(host=os.getenv("REDIS_HOST", "redis"), port=6379, db=0)
 
-# TODO: vmStart, vmStatus, release, resetSimple, get list, vmReset, researve
+# TODO: vmStart, vmStatus, resetSimple, get list, vmReset
+
+async def reset_redis(db: AsyncSession):
+    gstrems_db = await crud.gamestream.get_gstream_all(db)
+    for gstream in gstrems_db:
+        if (gstream.status != "idle"):
+            cache.set(f"room:{gstream.id}:occupied", "True")
+            cache.set(f"room:{gstream.id}:user_id", gstream.player_id)  # Store user ID in cache
+            cache.set(f"user:{gstream.player_id}:room_id", gstream.id)  # Cache the room ID for the user
+        else:
+            cache.set(f"room:{gstream.id}:occupied", "False")
+
+async def check_redis(db: AsyncSession):
+    room_keys = cache.keys("room:*:occupied")
+
+    if len(room_keys) == 0:
+        await reset_redis(db)
+        room_keys = cache.keys("room:*:occupied")
+
+    return room_keys            
+
 
 # GET
 @router.get("", response_model=List[schemas.GameStreamResponse])
 async def read_gstreams(db: AsyncSession = Depends(get_db), skip: int = 0, limit: int = 100):
     return await crud.gamestream.get_multi(db, skip=skip, limit=limit)
 
-@router.get("/check_all_caches", response_model=schemas.ResponseBase)
-async def check_all_caches():
-    # Get all room keys from Redis
-    room_keys = cache.keys("room:*:occupied")
+@router.get("/checkSimple", response_model=schemas.ResponseBase)
+async def check_all_caches(db: AsyncSession = Depends(get_db)):
+    room_keys = await check_redis(db)
     response = {
         "rooms": {}
     }
@@ -36,91 +56,95 @@ async def check_all_caches():
     
         is_occupied = cache.get(f"room:{room_id}:occupied")
         room_user_id = cache.get(f"room:{room_id}:user_id")
-    
+        
+        is_occupied = is_occupied.decode("utf-8") == "True"
+   
         response["rooms"][room_id] = {
-            "is_occupied": bool(is_occupied),
-            "user_id": int(room_user_id) if room_user_id else None,
+            "is_occupied": is_occupied,
+            "user_id": room_user_id if room_user_id else None,
         }
-
+    
     return schemas.SuccessResponse(data=response)
+
 
 
 # POST
 @router.post("", response_model=schemas.GameStreamResponse)
 async def create_gstream(*, db: AsyncSession = Depends(get_db), gstream_body: schemas.GameStreamCreate):
-    gstream = await crud.gamestream.upsert_gamestream(db, gstream_body)
+    gstream = await crud.gamestream.upsert_gstream(db, gstream_body)
     return gstream
 
-@router.post("/researve", response_model=schemas.ResponseBase)
-async def gstream_researve(*, db: AsyncSession = Depends(get_db), gstream_body: schemas.GameStreamReserve):
-
+@router.post("/resetSimple", response_model=schemas.Message)
+async def reset_redis_manually(db: AsyncSession = Depends(get_db)):
     try:
-        # Check Redis cache for user occupancy
-        current_room_id = cache.get(f"user:{gstream_body.player_id}:room_id")
-        if current_room_id:
-            return schemas.ErrorResponse(code=404, message=f"User is already checked into: {int(current_room_id)}")
-        
-        # Also check the database for user occupancy
-        room = await crud.gamestream.get_by_user_id(db, gstream_body.player_id)
-        if room:
-            return schemas.ErrorResponse(code=404, message=f"User is already checked into: {room.id}")
-        
-
-        gstream = await crud.gamestream.get_idle_stream(db)
-        if gstream:
-            gstream_update = {"id": gstream.id, "status": "researved", "game_id":gstream_body.game_id, "player_id": gstream_body.player_id}
-            gstream = await crud.gamestream.update(db, db_obj=gstream, obj_in=gstream_update)
-            # Update Redis cache
-            cache.set(f"room:{gstream.id}:occupied", True)
-            cache.set(f"room:{gstream.id}:user_id", gstream.player_id)  # Store user ID in cache
-            cache.set(f"user:{gstream.player_id}:room_id", gstream.id)  # Cache the room ID for the user
-            
-            return schemas.SuccessResponse(data=jsonable_encoder(gstream))
-
-        key = gstream_body.nation
-        if key == None:
-            key = 'kr'
-      
-
+        await reset_redis(db)
+        return {"message": "Redis reset done."}
     except Exception as e:
         return schemas.ErrorResponse(code=500, message=f"An error occurred: {str(e)}")
 
 
+@router.post("/researve", response_model=schemas.ResponseBase)
+async def gstream_researve(*, db: AsyncSession = Depends(get_db), gstream_body: schemas.GameStreamReserve):
+    try:
+        room_keys = await check_redis(db)
+
+        if len(room_keys) > 0:
+            # Check Redis cache for user occupancy
+            current_room_id = cache.get(f"user:{gstream_body.player_id}:room_id")
+            if current_room_id:
+                return schemas.ErrorResponse(code=404, message=f"User is already checked into: {int(current_room_id)}")
+            
+            # Check which rooms are occupied
+            unoccupied_rooms = [
+                key.decode("utf-8").split(":")[1] 
+                for key in room_keys 
+                    if cache.get(key).decode("utf-8") == "False"  # Check for unoccupied rooms
+            ]
+            
+            if len(unoccupied_rooms) > 0:
+                gstream = await crud.gamestream.get(db, model_id=int(unoccupied_rooms[0]))
+                if gstream == None:
+                    return schemas.ErrorResponse(code=404, message="Redis Database got wrong")
+
+                gstream_update = {"id": gstream.id, "status": "researved", "game_id":gstream_body.game_id, "player_id": gstream_body.player_id, "started":func.now(), "ended":None}
+                updated_gstream = await crud.gamestream.update(db, db_obj=gstream, obj_in=gstream_update)
+
+                cache.set(f"room:{updated_gstream.id}:occupied", "True")
+                cache.set(f"room:{updated_gstream.id}:user_id", updated_gstream.player_id)  # Store user ID in cache
+                cache.set(f"user:{updated_gstream.player_id}:room_id", updated_gstream.id)  # Cache the room ID for the user
+                   
+                return schemas.SuccessResponse(data=jsonable_encoder(updated_gstream))
+
+            # key = gstream_body.nation
+            # if key == None:
+            #     key = 'kr'
+
+        return schemas.ErrorResponse(code=404, message="The available Game Stream Server does not exist. Try again later")
+  
+    except Exception as e:
+        return schemas.ErrorResponse(code=500, message=f"An error occurred: {str(e)}")
 
 
-# # Updated check-in endpoint
-# @app.post("/checkin/{user_id}", response_model=dict)
-# async def check_in(user_id: int):
-#     db = SessionLocal()
+@router.post("/release", response_model=schemas.ResponseBase)
+async def gstream_release(*, db: AsyncSession = Depends(get_db), gstream_body: schemas.GameStreamReleaseQuit):
+    try:
+        gstream = await crud.gamestream.get(db, model_id=gstream_body.id)
 
-#     # Check Redis cache for user occupancy
-#     current_room_id = cache.get(f"user:{user_id}:room_id")
-    
-#     # Also check the database for user occupancy
-#     if current_room_id:
-#         return {"detail": "User is already checked into a room", "room_id": int(current_room_id)}
-    
-#     room = db.query(RoomModel).filter(RoomModel.user_id == user_id).first()
-#     if room:
-#         # User is already checked into a room in the database
-#         return {"detail": "User is already checked into a room", "room_id": room.id}
+        if not gstream or gstream.player_id != gstream_body.player_id:
+            return schemas.ErrorResponse(code=400, message=f"The gamestream with ID: {gstream_body.id} does not exist in the system or player id: {gstream_body.player_id} error")
+        
+        gstream_update = {"id": gstream.id, "status": "idle", "game_id":None, "player_id": None, "ended":func.now()}
+        gstream = await crud.gamestream.update(db, db_obj=gstream, obj_in=gstream_update)
 
-#     # Find a random empty room
-#     available_room = db.query(RoomModel).filter(RoomModel.is_occupied == False).first()
-#     if not available_room:
-#         raise HTTPException(status_code=400, detail="No available rooms")
+        # Remove from Redis cache
+        cache.set(f"room:{gstream.id}:occupied", "False")
+        cache.delete(f"room:{gstream.id}:user_id")  # Remove user ID from cache
+        cache.delete(f"user:{gstream.player_id}:room_id")  # Remove user ID from cache
 
-#     # Mark room as occupied and associate it with the user
-#     available_room.is_occupied = True
-#     available_room.user_id = user_id
-#     db.commit()
-    
-#     # Update Redis cache
-#     cache.set(f"room:{available_room.id}:occupied", True)
-#     cache.set(f"room:{available_room.id}:user_id", user_id)  # Store user ID in cache
-#     cache.set(f"user:{user_id}:room_id", available_room.id)  # Cache the room ID for the user
-    
-#     return {"detail": "User checked into room", "room_id": available_room.id}
+        return schemas.SuccessResponse(data=jsonable_encoder(gstream))
+
+    except Exception as e:
+        return schemas.ErrorResponse(code=500, message=f"An error occurred: {str(e)}")
 
 
 # PUT
@@ -155,34 +179,3 @@ async def delete_gstream(*, db: AsyncSession = Depends(get_db), id: int):
 
     except Exception as e:
         return schemas.ErrorResponse(code=500, message=f"An error occurred: {str(e)}")
-
-
-
-# # Endpoint to check out of a room
-# @app.post("/checkout/{user_id}", response_model=dict)
-# async def check_out(user_id: int):
-#     db = SessionLocal()
-#     current_room_id = cache.get(f"user:{user_id}:room_id")
-
-#     if not current_room_id:
-#         raise HTTPException(status_code=400, detail="User is not checked into any room")
-
-#     # Find the room associated with the user
-#     room = db.query(RoomModel).filter(RoomModel.id == int(current_room_id)).first()
-    
-#     if not room:
-#         raise HTTPException(status_code=404, detail="Room not found")
-    
-#     # Mark room as available and remove user association
-#     room.is_occupied = False
-#     room.user_id = None
-#     db.commit()
-    
-#     # Remove from Redis cache
-#     cache.delete(f"room:{room.id}:occupied")
-#     cache.delete(f"room:{room.id}:user_id")  # Remove user ID from cache
-#     cache.delete(f"user:{user_id}:room_id")  # Remove user ID from cache
-    
-#     return {"detail": "User checked out successfully", "room_id": room.id}
-
-# # To run the app: uvicorn main:app --reload

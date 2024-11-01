@@ -19,6 +19,8 @@ requests = "*"
 python-dotenv = "*"
 asyncpg = "*"
 redis = "*"
+websockets = "*"
+
 
 [requires]
 python_version = "3.8"
