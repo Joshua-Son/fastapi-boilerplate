@@ -9,13 +9,14 @@ from fastapi.encoders import jsonable_encoder
 import os
 import redis
 
+cache = redis.Redis(host=os.getenv("REDIS_HOST", "redis"), port=6379, db=0)
+
 from app import schemas, crud
 from app.api.deps import get_db
 
 router = APIRouter()
 
-# Initialize Redis
-cache = redis.Redis(host=os.getenv("REDIS_HOST", "redis"), port=6379, db=0)
+
 
 # TODO: vmStart, vmStatus, get list, vmReset
 
@@ -123,7 +124,7 @@ async def gstream_researve(*, db: AsyncSession = Depends(get_db), gstream_body: 
   
     except Exception as e:
         return schemas.ErrorResponse(code=500, message=f"An error occurred: {str(e)}")
-
+    
 
 @router.post("/release", response_model=schemas.ResponseBase)
 async def gstream_release(*, db: AsyncSession = Depends(get_db), gstream_body: schemas.GameStreamReleaseQuit):

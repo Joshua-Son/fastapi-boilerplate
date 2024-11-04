@@ -4,10 +4,13 @@ from sqlalchemy import text
 from app.crud.base import CRUDBase
 from app.models.arena import Arena
 from app.schemas.arena import ArenaCreate, ArenaUpdate
+from app.models.participation import Participation
 import datetime
 
 from sqlalchemy.future import select
 from fastapi.encoders import jsonable_encoder
+
+from sqlalchemy.orm import selectinload
 
 class CRUDArena(CRUDBase[Arena, ArenaCreate, ArenaUpdate]):
     async def create_arena(self, db: AsyncSession, input: ArenaCreate) -> Arena:
@@ -23,24 +26,29 @@ class CRUDArena(CRUDBase[Arena, ArenaCreate, ArenaUpdate]):
         async with db.begin():  # Start a transaction
             await db.execute(text("DELETE FROM arena")) 
     
-    async def get_empty_arena(self, db: AsyncSession, *, game_id: str, entry_fee: int, limit: int) -> List[Arena]:
+    async def get_empty_arena(self, db: AsyncSession, *, game_id: str, entry_fee: int, user_limit: int, user_id: str) -> List[Arena]:
         today = datetime.datetime.now()
         delta = datetime.timedelta(minutes=1439)
         ago = today - delta
 
+        participation_subquery = (
+            select(Participation.arena_id)
+            .filter(Participation.user_uuid == user_id)
+            ).subquery()
+
         ex = await db.execute(
-            select(self.model)
+            select(self.model).options(selectinload(Arena.participation))
             .filter(
                 self.model.game_id == game_id,
                 self.model.current_users > 0,
-                self.model.current_users < limit,
+                self.model.current_users < user_limit,
                 self.model.max_users.isnot(None),
-                self.model.max_users == limit,
+                self.model.max_users == user_limit,
                 self.model.entry_fee == entry_fee,
-                self.model.created_at >= ago
+                self.model.created_at >= ago,
+                ~self.model.id.in_(participation_subquery) 
             )
             .order_by(self.model.created_at.asc())
-            .limit(100)  # Limit the results to only the oldest record
         )
 
         return ex.scalars().all()

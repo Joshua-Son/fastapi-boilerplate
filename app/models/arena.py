@@ -13,4 +13,4 @@ class Arena(Base):
     current_users = Column(Integer, nullable=False, server_default='0')
 
     # Define the relationship to participants
-    # participants = relationship("Participation", back_populates="arena", cascade="all, delete-orphan")
+    participation = relationship("Participation", back_populates="arena")

@@ -9,9 +9,6 @@ from app.schemas.participation import ParticipationCreate, ParticipationUpdate, 
 from sqlalchemy.future import select
 
 class CRUDParticipation(CRUDBase[Participation, ParticipationCreate, ParticipationUpdate]):
-    async def create_participation(self, db: AsyncSession, input: ParticipationCreate) -> Participation:
-        return await self.create(db, obj_in=input)
-
     async def get_all_participations(self, db: AsyncSession, skip: int = 0, limit: int = 100) -> List[Participation]:
         return await self.get_multi(db, skip=skip, limit=limit)
 

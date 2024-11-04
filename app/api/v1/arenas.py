@@ -2,6 +2,7 @@ from typing import Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import func
 
 from fastapi.encoders import jsonable_encoder
 
@@ -9,8 +10,11 @@ from app import schemas, crud
 from app.api.deps import get_db
 
 from typing import Dict
+import json
 
 router = APIRouter()
+
+from app.api.v1.gamestreams import cache 
 
 # TODO: signal, findtournament, removeplaym, removeplayt(torn)
 
@@ -54,6 +58,73 @@ async def read_arena(db: AsyncSession = Depends(get_db), skip: int = 0, limit: i
         return schemas.SuccessResponse(data=jsonable_encoder(arenas))
     except Exception as e:
         return schemas.ErrorResponse(code=500, message=f"An error occurred: {str(e)}", data=None)
+    
+@router.get("/signal", response_model=schemas.Message)
+async def get_signal(db: AsyncSession = Depends(get_db), arena_id: str = "", player_id: str = "", status: str = "", score: str = "", stream_id: str = "" ):
+    try:
+        current_room_id = cache.get(f"user:{player_id}:room_id")
+        
+        if status in ["resultg", "scoreg"] and current_room_id is None:
+            return schemas.ErrorResponse(
+                code=404,
+                message="The gamestream with this User does not exist in the system, or Player Error.",
+                data=None
+            )
+
+        if status == "resultg":
+            offscreen = "offs"
+            message_payload = {
+                "arena_id": arena_id,
+                "status": offscreen,
+                "player_id": player_id,
+                "score": score
+            }
+            await Simple.send_msg(player_id, json.dumps(message_payload))
+
+            gstream = await crud.gamestream.get(db, model_id=int(stream_id.strip()))
+            if not gstream or gstream.player_id != player_id:
+                return schemas.ErrorResponse(
+                    code=400,
+                    message=f"The gamestream with ID: {stream_id} does not exist or player ID: {player_id} error."
+                )
+
+            gstream_update = {
+                "id": gstream.id,
+                "status": "idle",
+                "game_id": None,
+                "player_id": None,
+                "ended": func.now()
+            }
+            await crud.gamestream.update(db, db_obj=gstream, obj_in=gstream_update)
+
+            # Clean up Redis cache
+            cache.set(f"room:{gstream.id}:occupied", "False")
+            cache.delete(f"room:{gstream.id}:user_id")
+            cache.delete(f"user:{gstream.player_id}:room_id")
+
+            print("call end vm api")
+            # TODO: await reset_webapi(f"http://{addrapi}/forcereset")
+
+        if status == "scoreg":
+            print("call score web api")
+            # TODO: result_m_score_webapi(arena_id, player_id, score)
+
+        message_payload = {
+            "arena_id": arena_id,
+            "status": status,
+            "player_id": player_id,
+            "score": score
+        }
+        await Simple.send_msg(player_id, json.dumps(message_payload))
+
+        return {"message": f"GameStream Signal {arena_id} - {player_id} - {status} - {score}."}
+
+    except Exception as e:
+        return schemas.ErrorResponse(
+            code=500,
+            message=f"An error occurred: {str(e)}",
+            data=None
+        )
    
 @router.post("/findmulti", response_model=schemas.ResponseBase)
 async def arena_findmulti(*, db: AsyncSession = Depends(get_db), arena_body: schemas.ArenaMultiCreateAPI):
@@ -67,9 +138,11 @@ async def arena_findmulti(*, db: AsyncSession = Depends(get_db), arena_body: sch
                 "entry_fee": None
             }
         else:
-            arena_list = await crud.arena.get_empty_arena(db,game_id=arena_body.game_id,entry_fee=int(arena_body.entryFee),limit=arena_body.user_limit)
+            arena_list = await crud.arena.get_empty_arena(db,game_id=arena_body.game_id,entry_fee=int(arena_body.entryFee),user_limit=arena_body.user_limit,user_id=arena_body.user_id)
             print(arena_list)
-            return schemas.SuccessResponse(message="TODO Test", data=jsonable_encoder(arena_list))
+
+            if len(arena_list) > 0:
+                arena = arena_list[0] if arena_list else None
 
         if arena is None:
             if create_data is None:
@@ -82,10 +155,6 @@ async def arena_findmulti(*, db: AsyncSession = Depends(get_db), arena_body: sch
             arena_schema = schemas.ArenaCreate(**create_data)
             arena = await crud.arena.create_arena(db, arena_schema)
 
-            # return schemas.SuccessResponse(data=jsonable_encoder(res))
-        else:
-            return schemas.SuccessResponse(message="TODO Test")
-
         encoded_arena = jsonable_encoder(arena)
 
         participate = {
@@ -93,10 +162,12 @@ async def arena_findmulti(*, db: AsyncSession = Depends(get_db), arena_body: sch
             "user_uuid": arena_body.user_id,
             "challenge": 1
         }
-
         
         arenaplayer_schema = schemas.ParticipationCreate(**participate)
-        arenaplayer = await crud.participation.create_participation(db, arenaplayer_schema)
+        arenaplayer = await crud.participation.create(db, obj_in = arenaplayer_schema)
+
+        print("participation: ")
+        print(jsonable_encoder(arenaplayer))
 
         return schemas.SuccessResponse(data=arena.id)
 

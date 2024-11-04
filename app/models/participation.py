@@ -12,5 +12,5 @@ class Participation(Base):
     challenge = Column(Integer)
     joined_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    # Optional: Define a relationship if you need to access Arena data easily
-    # arena = relationship("Arena", back_populates="participations")
+    # Define the relationship to participants
+    arena = relationship("Arena", back_populates="participation")

@@ -43,7 +43,8 @@ def upgrade():
         sa.Column('user_uuid', sa.UUID(), nullable=False),  # UUID for user from external DB
         sa.Column('arena_id', sa.UUID(), sa.ForeignKey('arena.id', ondelete='CASCADE'), nullable=False),  # Reference to Arena with cascade
         sa.Column('joined_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
-        sa.Column('challenge', sa.Integer, nullable=False)
+        sa.Column('challenge', sa.Integer, nullable=False),
+        # sa.ForeignKeyConstraint(['arena_id'], ['arena.id'])
     )
 
     # Create indexes on Participations
