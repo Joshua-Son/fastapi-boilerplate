@@ -11,12 +11,19 @@ from app.api.deps import get_db
 
 from typing import Dict
 import json
+import httpx
+
 
 router = APIRouter()
 
 from app.api.v1.gamestreams import cache 
 
-# TODO: signal, findtournament, removeplaym, removeplayt(torn)
+# TODO: findtournament, removeplaym, removeplayt(torn)
+
+vm_forcereset = "/forcereset"
+
+versusnow_url = "http://10.1.80.4"
+versusnow_api = "/api/gameApi/arena/upsertHistory/"
 
 class Simple:
     active_connections: Dict[str, WebSocket] = {}
@@ -32,7 +39,6 @@ class Simple:
     @staticmethod
     async def sm_broadcast(message: str):
         """Broadcast a message to all connected users."""
-        print('Broadcasting:', message)
         rmsocks = []  # List of sockets to remove
 
         for user_id, ws in Simple.active_connections.items():
@@ -47,6 +53,37 @@ class Simple:
             del Simple.active_connections[user_id]
 
         return message
+    
+async def request_vm_post(*, vm_api_url: str, vm_ip:str, post_data:Dict[str, Any] = None):
+    async with httpx.AsyncClient() as client:
+        response = await client.post("http://" + vm_ip + vm_api_url, json=post_data)
+
+        # 200: GET, 201: POST
+        if response.status_code == 201:
+            try:
+                # Parse the JSON response into the SuccessResponseModel
+                success_response = schemas.SuccessResponse(**response.json())
+                return success_response  # Return the parsed response
+            except Exception as e:
+                return schemas.ErrorResponse(code=500, message="Error parsing response from external API", data=None)
+        else:
+            return schemas.ErrorResponse(code=500, message="Failed to call VM Api", data=None)
+        
+async def request_web_post(*, web_api_url: str, post_data:Dict[str, Any] = None):
+    async with httpx.AsyncClient() as client:
+        response = await client.post(versusnow_url + web_api_url, json=post_data)
+
+        # 200: GET, 201: POST
+        if response.status_code == 201:
+            try:
+                # Parse the JSON response into the SuccessResponseModel
+                success_response = schemas.SuccessResponse(**response.json())
+                return success_response  # Return the parsed response
+            except Exception as e:
+                return schemas.ErrorResponse(code=500, message="Error parsing response from external API", data=None)
+        else:
+            return schemas.ErrorResponse(code=500, message="Failed to call VM Api", data=None)
+
 
 @router.get("", response_model=schemas.ResponseBase)
 async def read_arena(db: AsyncSession = Depends(get_db), skip: int = 0, limit: int = 100):
@@ -59,33 +96,32 @@ async def read_arena(db: AsyncSession = Depends(get_db), skip: int = 0, limit: i
     except Exception as e:
         return schemas.ErrorResponse(code=500, message=f"An error occurred: {str(e)}", data=None)
     
-@router.get("/signal", response_model=schemas.Message)
-async def get_signal(db: AsyncSession = Depends(get_db), arena_id: str = "", player_id: str = "", status: str = "", score: str = "", stream_id: str = "" ):
+@router.post("/signal", response_model=schemas.Message)
+async def post_signal(*, db: AsyncSession = Depends(get_db), signal_body: schemas.SignalAPI ):
     try:
-        current_room_id = cache.get(f"user:{player_id}:room_id")
+        current_room_id = cache.get(f"user:{signal_body.player_id}:room_id")
         
-        if status in ["resultg", "scoreg"] and current_room_id is None:
+        if signal_body.status in ["resultg", "scoreg"] and current_room_id is None:
             return schemas.ErrorResponse(
                 code=404,
                 message="The gamestream with this User does not exist in the system, or Player Error.",
                 data=None
             )
 
-        if status == "resultg":
-            offscreen = "offs"
+        if signal_body.status == "resultg":
             message_payload = {
-                "arena_id": arena_id,
-                "status": offscreen,
-                "player_id": player_id,
-                "score": score
+                "arena_id": signal_body.arena_id,
+                "status": "offs",
+                "player_id": signal_body.player_id,
+                "score": signal_body.score
             }
-            await Simple.send_msg(player_id, json.dumps(message_payload))
+            await Simple.send_msg(signal_body.player_id, json.dumps(message_payload))
 
-            gstream = await crud.gamestream.get(db, model_id=int(stream_id.strip()))
-            if not gstream or gstream.player_id != player_id:
+            gstream = await crud.gamestream.get(db, model_id=int(signal_body.stream_id.strip()))
+            if not gstream or gstream.player_id != signal_body.player_id:
                 return schemas.ErrorResponse(
                     code=400,
-                    message=f"The gamestream with ID: {stream_id} does not exist or player ID: {player_id} error."
+                    message=f"The gamestream with ID: {signal_body.stream_id} does not exist or player ID: {signal_body.player_id} error."
                 )
 
             gstream_update = {
@@ -103,21 +139,34 @@ async def get_signal(db: AsyncSession = Depends(get_db), arena_id: str = "", pla
             cache.delete(f"user:{gstream.player_id}:room_id")
 
             print("call end vm api")
-            # TODO: await reset_webapi(f"http://{addrapi}/forcereset")
+            vm_response = await request_vm_post(vm_api_url=vm_forcereset, vm_ip=gstream.addrapi)
 
-        if status == "scoreg":
+            if isinstance(vm_response, schemas.SuccessResponse):
+                print(vm_response.message)
+            elif isinstance(vm_response, schemas.ErrorResponse):
+                print("error!!!")
+                print(vm_response.message)
+
+        if signal_body.status == "scoreg":
             print("call score web api")
-            # TODO: result_m_score_webapi(arena_id, player_id, score)
+            jsondata = {
+                "history_id": signal_body.arena_id,
+                "user_id": signal_body.player_id,
+                "score": signal_body.score
+            }
+            web_response = await request_web_post(web_api_url=versusnow_api, post_data=jsondata)
+            print(web_response.message)
+
 
         message_payload = {
-            "arena_id": arena_id,
-            "status": status,
-            "player_id": player_id,
-            "score": score
+            "arena_id": signal_body.arena_id,
+            "status": signal_body.status,
+            "player_id": signal_body.player_id,
+            "score": signal_body.score
         }
-        await Simple.send_msg(player_id, json.dumps(message_payload))
+        await Simple.send_msg(signal_body.player_id, json.dumps(message_payload))
 
-        return {"message": f"GameStream Signal {arena_id} - {player_id} - {status} - {score}."}
+        return {"message": f"GameStream Signal {signal_body.arena_id} - {signal_body.player_id} - {signal_body.status} - {signal_body.score}."}
 
     except Exception as e:
         return schemas.ErrorResponse(
@@ -169,7 +218,7 @@ async def arena_findmulti(*, db: AsyncSession = Depends(get_db), arena_body: sch
         print("participation: ")
         print(jsonable_encoder(arenaplayer))
 
-        return schemas.SuccessResponse(data=arena.id)
+        return schemas.SuccessResponse(code=201, data=arena.id)
 
     except Exception as e:
         return schemas.ErrorResponse(code=500, message=f"An error occurred: {str(e)}", data=None)

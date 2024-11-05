@@ -8,6 +8,7 @@ from fastapi.encoders import jsonable_encoder
 
 import os
 import redis
+import httpx
 
 cache = redis.Redis(host=os.getenv("REDIS_HOST", "redis"), port=6379, db=0)
 
@@ -16,9 +17,10 @@ from app.api.deps import get_db
 
 router = APIRouter()
 
+vm_status = "/status"
 
 
-# TODO: vmStart, vmStatus, get list, vmReset
+# TODO: vmStart, get list, vmReset
 
 async def reset_redis(db: AsyncSession):
     gstrems_db = await crud.gamestream.get_gstream_all(db)
@@ -39,6 +41,21 @@ async def check_redis(db: AsyncSession):
 
     return room_keys            
 
+
+async def request_vm_get(*, vm_api_url: str, vm_ip:str):
+    async with httpx.AsyncClient() as client:
+        response = await client.get("http://" + vm_ip + vm_api_url)
+
+        # 200: GET, 201: POST
+        if response.status_code == 200:
+            try:
+                # Parse the JSON response into the SuccessResponseModel
+                success_response = schemas.SuccessResponse(**response.json())
+                return success_response  # Return the parsed response
+            except Exception as e:
+                return schemas.ErrorResponse(code=500, message="Error parsing response from external API", data=None)
+        else:
+            return schemas.ErrorResponse(code=500, message="Failed to call VM Api", data=None)
 
 # GET
 @router.get("", response_model=List[schemas.GameStreamResponse])
@@ -67,6 +84,20 @@ async def check_all_caches(db: AsyncSession = Depends(get_db)):
     
     return schemas.SuccessResponse(data=response)
 
+@router.get("/vmStatus", response_model=schemas.ResponseBase)
+async def vm_status_check(params: schemas.VMStatus):
+    try:
+        vm_response = await request_vm_get(vm_ip=params.vm_api_url, vm_api_url=vm_status)
+
+        if isinstance(vm_response, schemas.SuccessResponse):
+            print(vm_response.message)
+        elif isinstance(vm_response, schemas.ErrorResponse):
+            print("error!!!")
+            print(vm_response.message)
+        return vm_response
+    
+    except Exception as e:
+        return schemas.ErrorResponse(code=500, message=f"An error occurred: {str(e)}")
 
 
 # POST
@@ -114,7 +145,7 @@ async def gstream_researve(*, db: AsyncSession = Depends(get_db), gstream_body: 
                 cache.set(f"room:{updated_gstream.id}:user_id", updated_gstream.player_id)  # Store user ID in cache
                 cache.set(f"user:{updated_gstream.player_id}:room_id", updated_gstream.id)  # Cache the room ID for the user
                    
-                return schemas.SuccessResponse(data=jsonable_encoder(updated_gstream))
+                return schemas.SuccessResponse(code=201, data=jsonable_encoder(updated_gstream))
 
             # key = gstream_body.nation
             # if key == None:
@@ -142,11 +173,19 @@ async def gstream_release(*, db: AsyncSession = Depends(get_db), gstream_body: s
         cache.delete(f"room:{gstream.id}:user_id")  # Remove user ID from cache
         cache.delete(f"user:{gstream.player_id}:room_id")  # Remove user ID from cache
 
-        return schemas.SuccessResponse(data=jsonable_encoder(gstream))
+        return schemas.SuccessResponse(code=201, data=jsonable_encoder(gstream))
 
     except Exception as e:
         return schemas.ErrorResponse(code=500, message=f"An error occurred: {str(e)}")
+    
+@router.post("/vmStart", response_model=schemas.ResponseBase)
+async def vm_start_game(*, db: AsyncSession = Depends(get_db), gstart_body: schemas.GameStartModel):
+    try:
+        pass
 
+    except Exception as e:
+        return schemas.ErrorResponse(code=500, message=f"An error occurred: {str(e)}")
+    pass
 
 # PUT
 @router.put("", response_model=schemas.GameStreamResponse)

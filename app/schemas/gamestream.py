@@ -41,3 +41,15 @@ class GameStreamReleaseQuit(BaseModel):
 class GameStreamResponse(GameStreamBase):
     class Config:
         from_attributes = True
+
+class GameStartModel(BaseModel):
+    vm_api_url: str
+    game_id: str
+    player_id: str
+    player_jwt: str
+    match_uuid: str
+    entry_fee: str
+    coin_type: str
+    
+class VMStatus(BaseModel):
+    vm_api_url: str

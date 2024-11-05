@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 import uuid
-from typing import Optional
+from typing import Optional, Any
 from datetime import datetime, timezone
 
 
@@ -24,6 +24,15 @@ class ArenaMultiCreateAPI(BaseModel):
     entryFee: float
     is_practice: bool
     user_limit: int
+
+
+class SignalAPI(BaseModel):
+    arena_id: str
+    player_id: str
+    status: str
+    score: str
+    stream_id: str
+
 
 
 class ArenaUpdate(ArenaBase):
